@@ -1,7 +1,6 @@
 -- MAIN SCRIPT FOR DONKEY'S MAIN SCRIPT --
 -- By Earl Donkey
 
-
 -- Prevent running outside Roblox
 if not game or not workspace or not game.Players then
     while true do end
@@ -45,6 +44,9 @@ local AimSmoothness = 0.18      -- lower = stronger / faster
 local PredictionStrength = 0.13
 local StrongLockBoost = 1.25
 local VisibilityCheck = true
+-- Phase View
+local PhaseParts = {}
+local PhaseActive = false
 
 -- ESP Storage
 local ESPs = {}
@@ -72,7 +74,7 @@ frame.BackgroundColor3 = Theme.Main
 frame.BorderSizePixel = 0
 frame.Parent = screenGui
 
--- Curved frame
+-- Curved frame	
 local frameCorner = Instance.new("UICorner")
 frameCorner.CornerRadius = UDim.new(0, 12)
 frameCorner.Parent = frame
@@ -667,47 +669,46 @@ end)
 -- Noclip toggle
 local noclipConnection
 local function enableNoclip()
-	local lpChar = localPlayer.Character
-	if not lpChar then return end
-	local hrp = lpChar:FindFirstChild("HumanoidRootPart")
-	local humanoid = lpChar:FindFirstChildWhichIsA("Humanoid")
-	if not hrp or not humanoid then return end
+	if noclipConnection then noclipConnection:Disconnect() end
+	local char = localPlayer.Character
+	if not char then return end
 
-	for _, part in pairs(lpChar:GetDescendants()) do
+	local hrp = char:WaitForChild("HumanoidRootPart")
+	local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+	if not humanoid then return end
+
+	humanoid.PlatformStand = true
+
+	for _, part in pairs(char:GetDescendants()) do
 		if part:IsA("BasePart") then
 			part.CanCollide = false
 		end
 	end
 
-	humanoid.PlatformStand = true
+	local velocity = Vector3.zero
+	local accel = 9
+	local drag = 7
 
-	noclipConnection = RunService.RenderStepped:Connect(function(deltaTime)
+	noclipConnection = RunService.RenderStepped:Connect(function(dt)
 		if not NoclipEnabled then return end
-		local moveVector = Vector3.new(0,0,0)
 
-		if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-			moveVector += camera.CFrame.LookVector
-		end
-		if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-			moveVector -= camera.CFrame.LookVector
-		end
-		if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-			moveVector -= camera.CFrame.RightVector
-		end
-		if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-			moveVector += camera.CFrame.RightVector
-		end
-		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-			moveVector += Vector3.new(0,1,0)
-		end
-		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-			moveVector -= Vector3.new(0,1,0)
+		local cam = camera
+		local moveDir = Vector3.zero
+
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir -= cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir -= cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir += Vector3.new(0,1,0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir -= Vector3.new(0,1,0) end
+
+		if moveDir.Magnitude > 0 then
+			velocity = velocity:Lerp(moveDir.Unit * NoclipSpeed, accel * dt)
+		else
+			velocity = velocity:Lerp(Vector3.zero, drag * dt)
 		end
 
-		if moveVector.Magnitude > 0 then
-			moveVector = moveVector.Unit * NoclipSpeed * deltaTime
-			hrp.CFrame += moveVector
-		end
+		hrp.CFrame += velocity * dt
 	end)
 end
 
@@ -742,6 +743,13 @@ local function toggleNoclip()
 end
 noclipToggle.MouseButton1Click:Connect(toggleNoclip)
 
+localPlayer.CharacterAdded:Connect(function()
+	if NoclipEnabled then
+		task.wait(0.1)
+		enableNoclip()
+	end
+end)
+
 -- Improved Fly
 local flyVelocity
 local flyConnection
@@ -759,7 +767,7 @@ local function enableFly()
     flyVelocity.Velocity = Vector3.new(0,0,0)
     flyVelocity.Parent = hrp
 
-    flyConnection = RunService.RenderStepped:Connect(function(deltaTime)
+    flyConnection = RunService.RenderStepped:Connect(function(dt)
         if not FlyEnabled then return end
 
         local moveVector = Vector3.new(0,0,0)
@@ -784,7 +792,10 @@ local function enableFly()
             moveVector -= Vector3.new(0,1,0)
         end
 
-        if moveVector.Magnitude > 0 then
+        -- If no input, hover in place
+        if moveVector.Magnitude == 0 then
+            moveVector = Vector3.new(0,0,0) -- just hover
+        else
             moveVector = moveVector.Unit * FlySpeed
         end
 
@@ -793,22 +804,20 @@ local function enableFly()
 end
 
 local function disableFly()
-    local lpChar = localPlayer.Character
-    if not lpChar then return end
-    local humanoid = lpChar:FindFirstChildWhichIsA("Humanoid")
-    local hrp = lpChar:FindFirstChild("HumanoidRootPart")
-    if humanoid then
-        humanoid.PlatformStand = false
-    end
-    if flyVelocity then
-        flyVelocity:Destroy()
-        flyVelocity = nil
-    end
-    if flyConnection then
-        flyConnection:Disconnect()
-        flyConnection = nil
-    end
+	local char = localPlayer.Character
+	if not char then return end
+
+	local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+	if humanoid then
+		humanoid.PlatformStand = false
+	end
+
+	if flyConnection then
+		flyConnection:Disconnect()
+		flyConnection = nil
+	end
 end
+
 
 local function toggleFly()
     FlyEnabled = not FlyEnabled
@@ -821,125 +830,161 @@ local function toggleFly()
 end
 flyToggle.MouseButton1Click:Connect(toggleFly)
 
--- Keybinds
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-
-    if input.KeyCode == Enum.KeyCode.CapsLock then
-        frame.Visible = not frame.Visible
-        settingsFrame.Visible = false
-        settingsFrameVisible = false
-        charFrame.Visible = false
-        charFrameVisible = false
-        return
-    end
-
-    -- Dynamic hotkey execution
-    if input.KeyCode == Hotkeys.Aimlock then
-        AimlockEnabled = not AimlockEnabled
-        aimToggle.Text = AimlockEnabled and "Aimlock: ON" or "Aimlock: OFF"
-        fovCircle.Visible = AimlockEnabled
-    elseif input.KeyCode == Hotkeys.Noclip then
-        toggleNoclip()
-    elseif input.KeyCode == Hotkeys.Fly then
-        toggleFly()
-    elseif input.KeyCode == Hotkeys.ESP then
-        toggleESP()
-    end
+localPlayer.CharacterAdded:Connect(function()
+	if FlyEnabled then
+		task.wait(0.1)
+		enableFly()
+	end
 end)
 
--- RenderStepped
-local function getTargetPart(character)
-    -- Priority: Head -> head -> HumanoidRootPart -> highest part
-    if character:FindFirstChild("Head") then return character.Head end
-    if character:FindFirstChild("head") then return character.head end
-    if character:FindFirstChild("HumanoidRootPart") then return character.HumanoidRootPart end
+-- Phase View functions
 
-    -- fallback: find highest BasePart
-    local highestPart
-    local highestY = -math.huge
-    for _, part in pairs(character:GetDescendants()) do
-        if part:IsA("BasePart") and part.Position.Y > highestY then
-            highestY = part.Position.Y
-            highestPart = part
-        end
-    end
-    return highestPart
+local function enablePhaseView()
+	if PhaseViewActive then return end
+	PhaseViewActive = true
+	ModifiedParts = {}
+
+	for _, part in ipairs(workspace:GetDescendants()) do
+		if part:IsA("BasePart") and part.Transparency < 1 then
+			ModifiedParts[part] = {
+				Transparency = part.Transparency,
+				CanCollide = part.CanCollide
+			}
+
+			part.Transparency = math.clamp(part.Transparency + 0.6, 0, 1)
+			part.CanCollide = false
+		end
+	end
+end
+
+local function disablePhaseView()
+	if not PhaseViewActive then return end
+	PhaseViewActive = false
+
+	for part, data in pairs(ModifiedParts) do
+		if part and part.Parent then
+			part.Transparency = data.Transparency
+			part.CanCollide = data.CanCollide
+		end
+	end
+
+	ModifiedParts = {}
+end
+
+-- Keybinds
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+
+	if input.KeyCode == Enum.KeyCode.CapsLock then
+		frame.Visible = not frame.Visible
+		settingsFrame.Visible = false
+		settingsFrameVisible = false
+		charFrame.Visible = false
+		charFrameVisible = false
+		return
+	end
+
+	-- Hold K → Phase View ON
+	if input.KeyCode == Enum.KeyCode.L then
+		enablePhaseView()
+	end
+
+	-- Dynamic hotkey execution
+	if input.KeyCode == Hotkeys.Aimlock then
+		AimlockEnabled = not AimlockEnabled
+		aimToggle.Text = AimlockEnabled and "Aimlock: ON" or "Aimlock: OFF"
+		fovCircle.Visible = AimlockEnabled
+	elseif input.KeyCode == Hotkeys.Noclip then
+		toggleNoclip()
+	elseif input.KeyCode == Hotkeys.Fly then
+		toggleFly()
+	elseif input.KeyCode == Hotkeys.ESP then
+		toggleESP()
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	-- Release K → Phase View OFF
+	if input.KeyCode == Enum.KeyCode.L then
+		disablePhaseView()
+	end
+end)
+
+-- ===== AIMLOCK SYSTEM =====
+local function getTargetPart(character)
+    -- Prefer Head -> HumanoidRootPart -> highest part
+    return character:FindFirstChild("Head")
+        or character:FindFirstChild("head")
+        or character:FindFirstChild("HumanoidRootPart")
+        or (function()
+            local highestPart
+            local highestY = -math.huge
+            for _, part in pairs(character:GetDescendants()) do
+                if part:IsA("BasePart") and part.Position.Y > highestY then
+                    highestY = part.Position.Y
+                    highestPart = part
+                end
+            end
+            return highestPart
+        end)()
 end
 
 local function isVisible(part)
-	if not VisibilityCheck then return true end
-	local params = RaycastParams.new()
-	params.FilterDescendantsInstances = {localPlayer.Character}
-	params.FilterType = Enum.RaycastFilterType.Blacklist
+    if not VisibilityCheck then return true end
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {localPlayer.Character}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
 
-	local origin = camera.CFrame.Position
-	local direction = (part.Position - origin)
+    local origin = camera.CFrame.Position
+    local direction = part.Position - origin
 
-	local result = workspace:Raycast(origin, direction, params)
-	return result and result.Instance:IsDescendantOf(part.Parent)
+    local result = workspace:Raycast(origin, direction, params)
+    return not result or result.Instance:IsDescendantOf(part.Parent)
 end
 
 local function getPredictedPosition(part)
-	local velocity = part.AssemblyLinearVelocity or Vector3.zero
-	return part.Position + (velocity * PredictionStrength)
+    local velocity = part.AssemblyLinearVelocity or Vector3.zero
+    return part.Position + velocity * PredictionStrength
 end
 
-
 RunService.RenderStepped:Connect(function()
-    -- FOV circle
+    -- Update FOV circle
     if fovCircle.Visible then
         fovCircle.Size = UDim2.new(0, AimlockDistance, 0, AimlockDistance)
         fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
     end
 
-    -- ESP
-    if ESPEnabled then
-        for _,player in pairs(Players:GetPlayers()) do
-            if player.Character and (not ESPs[player] or not ESPs[player].highlight or not ESPs[player].highlight.Parent) then
-                createESP(player)
-            end
-        end
-    end
-
-    -- Aimlock
+    -- AIMLOCK
     if AimlockEnabled then
-        local bestTarget = nil
+        local closestPart = nil
         local bestScore = math.huge
+        local camPos = camera.CFrame.Position
 
-        for _,player in pairs(Players:GetPlayers()) do
+        for _, player in pairs(Players:GetPlayers()) do
             if player ~= localPlayer and player.Team ~= localPlayer.Team and player.Character then
-                local part = getTargetPart(player.Character)
-                if part and isVisible(part) then
-                    local predicted = getPredictedPosition(part)
-                    local dir = predicted - camera.CFrame.Position
+                local targetPart = getTargetPart(player.Character)
+                if targetPart and isVisible(targetPart) then
+                    local predictedPos = getPredictedPosition(targetPart)
+                    local dir = predictedPos - camPos
                     local distance = dir.Magnitude
                     local angle = math.deg(math.acos(camera.CFrame.LookVector:Dot(dir.Unit)))
 
-                    if angle <= AimlockFOV and distance <= AimlockDistance then
-                        local score =
-                            distance
-                            + (angle * 3)
-                            - (part.AssemblyLinearVelocity.Magnitude * 0.4)
-
+                    if distance <= AimlockDistance and angle <= AimlockFOV then
+                        local score = distance + angle * 3 - targetPart.AssemblyLinearVelocity.Magnitude * 0.4
                         if score < bestScore then
                             bestScore = score
-                            bestTarget = part
+                            closestPart = targetPart
                         end
                     end
                 end
             end
         end
 
-        if bestTarget then
-            local predicted = getPredictedPosition(bestTarget)
-            local camPos = camera.CFrame.Position
-
+        if closestPart then
+            local predictedPos = getPredictedPosition(closestPart)
             local strongFactor = math.clamp(1 / (bestScore / AimlockDistance), 1, StrongLockBoost)
-            local smooth = math.clamp(AimSmoothness / strongFactor, 0.05, AimSmoothness)
-
-            local targetCF = CFrame.lookAt(camPos, predicted)
-            camera.CFrame = camera.CFrame:Lerp(targetCF, smooth)
+            local lerpAmount = math.clamp(AimSmoothness / strongFactor, 0.05, AimSmoothness)
+            camera.CFrame = camera.CFrame:Lerp(CFrame.lookAt(camPos, predictedPos), lerpAmount)
         end
     end
 end)
